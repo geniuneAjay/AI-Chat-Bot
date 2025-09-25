@@ -1,0 +1,194 @@
+<!-- ai-chatbot.component.html -->
+<div class="main-container">
+  <div class="chat-container">
+    <!-- Header with tools -->
+    <div class="tools-container">
+      <a mat-icon-button matTooltip="Back" (click)="back()">
+        <i class="material-icons">arrow_back</i>
+      </a>
+      <h2>Smart Query Assistant</h2>
+      <div class="header-actions">
+        <button mat-icon-button matTooltip="Clear Chat History" class="clear-btn" (click)="clearChatHistory()">
+          <i class="material-icons">delete_sweep</i>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Messages Area -->
+    <div class="messages-wrapper">
+      <div class="messages-area" #messagesContainer (scroll)="onScroll($event)">
+        <!-- Display messages -->
+        <div
+          *ngFor="let message of messages; let i = index"
+          [ngClass]="{
+            'user-message': message.sender === 'user',
+            'bot-message': message.sender === 'bot'
+          }"
+          class="message">
+          
+          <!-- User message display -->
+          <div *ngIf="message.sender === 'user'" class="message-content" [innerHTML]="message.formattedText"></div>
+          
+          <!-- Bot message display based on type -->
+          <div *ngIf="message.sender === 'bot'" class="bot-content">
+            
+            <!-- Table Display -->
+            <div *ngIf="message.displayType === 'table' && message.tableHeaders && message.tableData" class="table-section">
+              <div class="result-header">
+                <div class="result-info">
+                  <h4>
+                    <mat-icon class="result-icon">data_table</mat-icon>
+                    Found {{message.count || message.tableData.length}} results
+                  </h4>
+                </div>
+                
+                <!-- Export Button -->
+                <div class="export-actions">
+                  <button mat-raised-button class="export-btn" 
+                          (click)="exportToExcel(i)"
+                          [disabled]="exportInProgress[i] || !message.rawData || message.rawData.length === 0">
+                    <mat-icon *ngIf="!exportInProgress[i]">download</mat-icon>
+                    <mat-spinner *ngIf="exportInProgress[i]" diameter="20"></mat-spinner>
+                    <span>{{exportInProgress[i] ? 'Exporting...' : 'Export to Excel'}}</span>
+                  </button>
+                </div>
+              </div>
+              
+              <div class="table-card">
+                <div class="table-wrapper">
+                  <table class="dynamic-table">
+                    <thead>
+                      <tr>
+                        <th class="row-number">
+                          <span>#</span>
+                        </th>
+                        <th *ngFor="let header of message.tableHeaders" [title]="header">
+                          <div class="header-content">
+                            <span>{{formatHeaderName(header)}}</span>
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr *ngFor="let row of message.tableData; let rowIdx = index" class="data-row">
+                        <td class="row-number">
+                          <span class="row-number-badge">{{rowIdx + 1}}</span>
+                        </td>
+                        <td *ngFor="let cell of row; let colIdx = index"
+                            [ngClass]="{
+                              'clickable': cell.clickable,
+                              'status-cell': cell.type === 'status',
+                              'flag-cell': cell.type === 'flag'
+                            }"
+                            (click)="cell.clickable ? onCellClick(i, rowIdx, colIdx) : null">
+                          <span *ngIf="cell.type === 'status'" 
+                                class="status-badge" 
+                                [ngClass]="cell.statusClass">
+                            <span class="status-dot"></span>
+                            {{cell.value}}
+                          </span>
+                          <span *ngIf="cell.type === 'flag'" 
+                                class="flag-badge" 
+                                [ngClass]="cell.flagClass">
+                            {{cell.value}}
+                          </span>
+                          <span *ngIf="cell.type === 'text' || cell.type === 'empty'" 
+                                class="text-value">
+                            {{cell.value}}
+                          </span>
+                          <span *ngIf="cell.type === 'date'" class="date-value">
+                            <mat-icon class="date-icon">calendar_today</mat-icon>
+                            {{cell.value | date:'MMM d, y'}}
+                          </span>
+                          <a *ngIf="cell.type === 'name' || cell.type === 'id'" 
+                             class="link-text">
+                            {{cell.value}}
+                            <mat-icon class="link-icon">open_in_new</mat-icon>
+                          </a>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              
+              <!-- SQL Display Toggle -->
+              <div class="sql-footer" *ngIf="message.sqlQuery">
+                <button mat-button class="sql-toggle" 
+                        (click)="toggleSQL(i)">
+                  <mat-icon>code</mat-icon>
+                  {{showSQL[i] ? 'Hide' : 'Show'}} SQL Query
+                </button>
+                <div class="sql-content" *ngIf="showSQL[i]">
+                  <code>{{message.sqlQuery}}</code>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Count Display -->
+            <div *ngIf="message.displayType === 'count'" class="summary-section">
+              <div class="summary-card" [innerHTML]="message.formattedText"></div>
+            </div>
+            
+            <!-- Summary Display -->
+            <div *ngIf="message.displayType === 'summary'" class="summary-section">
+              <div class="summary-card" [innerHTML]="message.formattedText"></div>
+            </div>
+            
+            <!-- Text Display -->
+            <div *ngIf="message.displayType === 'text' || !message.displayType" 
+                 class="message-content" 
+                 [innerHTML]="message.formattedText"></div>
+          </div>
+          
+          <div class="message-time">
+            {{ message.timestamp | date:'short' }}
+          </div>
+        </div>
+        
+        <!-- Typing indicator -->
+        <div *ngIf="isLoading" class="typing-indicator">
+          <div class="typing-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <span class="typing-text">Processing query...</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Fixed Footer with predefined questions and input -->
+    <div class="chat-footer">
+      <!-- Predefined questions buttons -->
+      <div class="predefined-buttons" *ngIf="!isLoading">
+        <button 
+          *ngFor="let question of predefinedQuestions"
+          class="predefined-btn"
+          (click)="sendPredefinedQuestion(question)"
+          [disabled]="isLoading">
+          {{ question }}
+        </button>
+      </div>
+      
+      <!-- Input area -->
+      <div class="input-area">
+        <textarea
+          [(ngModel)]="userMessage"
+          placeholder="Ask about users, sales data, or any database query..."
+          (keypress)="onKeyPress($event)"
+          [disabled]="isLoading"
+          rows="1">
+        </textarea>
+        <button
+          (click)="sendMessage()"
+          class="send-btn"
+          [disabled]="!userMessage.trim() || isLoading">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
