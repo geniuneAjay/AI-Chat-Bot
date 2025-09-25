@@ -1,0 +1,793 @@
+ public function HelloWorld()
+{
+    // Step 1: Get user query (natural language)
+    $userQuery = isset($_POST['filter']) ? $_POST['filter'] : "Show all sales executives in Uttar Pradesh who joined after 2024";
+    
+    // Step 2: Prepare the complete schema information
+    $schema = "You are an assistant that converts natural language into SQL queries for a user management system.
+
+## Database Tables
+
+### Table 1: sfa_user
+Main user management table with all user details.
+
+### Table 2: sfa_asm_assign
+Manages the reporting hierarchy between junior and senior employees.
+
+**Columns:**
+- `id` (INT, Primary Key) → Unique identifier for the mapping
+- `asm_id` (INT, Foreign Key) → References `sfa_user.id` - The junior employee's user ID (subordinate)
+- `rsm_id` (INT, Foreign Key) → References `sfa_user.id` - The senior employee's user ID (supervisor/manager)
+- `status` (TINYINT) → Active/Inactive status of the mapping
+- `created_date` (DATETIME) → When the mapping was created
+- `updated_date` (DATETIME) → When the mapping was last updated
+
+**Relationship Structure:**
+- One senior (rsm_id) can have multiple juniors (asm_id) reporting to them
+- Each junior (asm_id) is assigned to one senior (rsm_id)
+- Both asm_id and rsm_id reference the sfa_user table
+- Note: asm/rsm are just variable names - asm represents the junior/subordinate, rsm represents the senior/supervisor
+- IMPORTANT: An rsm_id (senior) can also appear as an asm_id in another record, meaning they have their own senior
+- This creates a multi-level hierarchy where someone can be both a senior to some and a junior to others
+
+### Table 3: sfa_primary_order
+Primary orders table managing all order transactions and details.
+
+**Key Columns:**
+- `id` (INT, Primary Key) → Order ID
+- `order_no` (VARCHAR) → Order number (e.g., PORD-2396)
+- `date_created` (DATETIME) → Order creation date
+- `created_by` (INT) → References sfa_user.id
+- `created_by_name` (VARCHAR) → Name of order creator
+- `created_by_type` (VARCHAR) → Type of creator (e.g., 'sales_user')
+- `total_order_qty` (INT) → Total quantity ordered
+- `order_item` (INT) → Number of distinct items
+- `weight` (FLOAT) → Order weight in tons
+- `order_total` (FLOAT) → Final order total amount
+- `order_status` (VARCHAR) → Status: Pending, Approved, Reject, Hold, despatched, partialDispatched
+- `warehouse` (VARCHAR) → Fulfillment warehouse (e.g., 'Savitri Woods')
+- `dispatch_date` (DATETIME) → When order was dispatched
+- `dispatch_qty` (INT) → Quantity dispatched (for partial dispatch)
+- `pending_qty` (INT) → Remaining quantity (for partial dispatch)
+- `marketing_points` (INT) → Marketing points earned
+- `order_create_remark` (VARCHAR) → Order remarks
+- `reason_reject` (TEXT) → Rejection/hold reason
+- `dr_id` (INT) → Dealer/retailer ID
+- `company_name` (VARCHAR) → Company details
+- `dr_code` (VARCHAR) → Account code
+- `freshOrdType` (VARCHAR) → 'Fresh Order' or 'Follow Up Order'
+- `network_type` (VARCHAR) → Customer type
+- `order_type` (VARCHAR) → Order type (e.g., 'PHONE ORDER')
+- `del` (INT) → Soft delete flag (0=active, 1=deleted)
+
+
+**Relationships:**
+- `created_by` links to sfa_user.id (who created the order)
+- `dr_id` links to sfa_dr.id (the customer/dealer who placed the order) // THIS IS THE KEY RELATIONSHIP
+- Can join with sfa_user and sfa_asm_assign to get creator's hierarchy
+- Has order items in sfa_primary_order_item linked by order_id
+- To get customer details (company_name, etc.), JOIN with sfa_dr ON sfa_primary_order.dr_id = sfa_dr.id
+
+### Table 4: sfa_dr
+Customer/Dealer/Distributor master table managing all customer accounts and relationships.
+
+**Key Columns:**
+- `id` (INT, Primary Key) → Customer/Dealer ID
+- `dr_code` (VARCHAR) → Header: 'Account Code' - GST-based account code
+- `company_name` (VARCHAR) → Header: 'Company Name' - Business/Company name
+- `name` (VARCHAR) → Header: 'Contact Person' - Primary contact person name
+- `mobile` (VARCHAR) → Header: 'Contact Number' - Primary mobile number
+- `email` (VARCHAR) → Email address
+- `type` (VARCHAR) → Customer type (1=Channel Partner, 3=Sub-Dealer, 7=Primary OEM, 8=Ply Expert, etc.)
+- `lead_type` (VARCHAR) → Lead classification (Dr, etc.)
+- `gst` (VARCHAR) → GST registration number
+
+**Creation & Update Tracking:**
+- `date_created` (DATETIME) → Header: 'Date Created' - Account creation date
+- `created_by` (INT) → References sfa_user.id - Creator user ID
+- `created_by_name` (VARCHAR) → Header: 'Created By' - Name of account creator
+- `last_updated_by` (INT) → Updater's user ID
+- `last_updated_by_name` (VARCHAR) → Header: 'Updated By' - Name of last updater
+- `last_updated_on` (DATETIME) → Header: 'Updated On' - Last update timestamp
+
+**Location Information:**
+- `country` (VARCHAR) → Country (default: INDIA)
+- `state` (VARCHAR) → Header: 'State Name' - Customer's state
+- `district` (VARCHAR) → Header: 'District' - Customer's district
+- `city` (VARCHAR) → Header: 'City' - Customer's city
+- `area` (VARCHAR) → Area/locality
+- `address` (TEXT) → Complete address
+- `pincode` (VARCHAR) → Postal code
+- `lat` (DECIMAL) → GPS latitude
+- `lng` (DECIMAL) → GPS longitude
+- `division_name` (VARCHAR) → Administrative division
+
+**Financial & Credit Information:**
+- `credit_limit` (DECIMAL) → Credit limit amount
+- `credit_period` (INT) → Credit period in days
+- `opening_balance` (DECIMAL) → Opening balance
+- `account_balance` (DECIMAL) → Current account balance
+- `credit_opening_balance` (DECIMAL) → Credit opening balance
+- `advance_payment` (DECIMAL) → Advance payment amount
+- `bank_name` (VARCHAR) → Bank name
+- `account_no` (VARCHAR) → Bank account number
+- `ifsc_code` (VARCHAR) → Bank IFSC code
+- `account_holder_name` (VARCHAR) → Account holder name
+
+**Business Metrics:**
+- `last_order` (DATETIME) → Header: 'Last Order' - Date of last order placed
+- `last_checkin` (DATETIME) → Header: 'Last Visit' - Date of last visit/check-in
+- `last_payment` (DATETIME) → Last payment date
+- `order_frequency` (INT) → Header: 'Order Frequency' - Average days between orders
+- `current_year_sales` (DECIMAL) → Header: 'Current Year Sales' - YTD sales amount
+- `marketing_points` (INT) → Accumulated marketing points
+- `wallet_point` (INT) → Wallet/loyalty points
+- `dr_sale_category` (VARCHAR) → Sales category classification
+
+**Assignment & Hierarchy:**
+- `assigned_sales_user_name` (VARCHAR) → Header: 'Assigned To' - Assigned sales person name
+- `assigned_warehouse` (VARCHAR) → Assigned warehouse for fulfillment
+- `assigned_state_warehouse` (VARCHAR) → State-level warehouse assignment
+
+**Status & Flags:**
+- `status` (ENUM: '0','1') → Header: 'Status' - Active(1)/Inactive(0) status
+- `del` (TINYINT) → Soft delete flag (0=active, 1=deleted)
+- `enquiry_lead_flag` (TINYINT) → Lead/enquiry flag
+- `warehouse_flag` (TINYINT) → Warehouse customer flag
+- `test_user_flag` (TINYINT) → Test account flag
+- `kyc_status` (VARCHAR) → KYC verification status
+- `profile_status` (VARCHAR) → Profile completion status
+
+**Authentication & Access:**
+- `username` (VARCHAR) → Login username (usually mobile number)
+- `password` (VARCHAR) → Encrypted password
+- `user_token` (TEXT) → JWT authentication token
+- `fcm_token` (TEXT) → Firebase push notification token
+- `device_unique_id` (VARCHAR) → Unique device identifier
+- `device_info` (TEXT) → Device details
+- `app_version` (VARCHAR) → Mobile app version
+- `first_login` (DATETIME) → First login timestamp
+- `latest_login` (DATETIME) → Most recent login
+
+**Documents & Verification:**
+- `pan_no` (VARCHAR) → PAN card number
+- `adhar_no` (VARCHAR) → Aadhaar number
+- `image` (VARCHAR) → Profile image path
+- `document_image` (VARCHAR) → Document front image
+- `document_image_back` (VARCHAR) → Document back image
+- `pan_img` (VARCHAR) → PAN card image
+- `bank_img` (VARCHAR) → Bank document image
+
+**Additional Fields:**
+- `altNumber` (VARCHAR) → Alternate contact number 1
+- `altNumber2` (VARCHAR) → Alternate contact number 2
+- `altNumber3` (VARCHAR) → Alternate contact number 3
+- `dob` (DATE) → Date of birth
+- `doa` (DATE) → Date of anniversary
+- `brand` (TEXT) → Associated brands
+- `marka` (VARCHAR) → Brand/mark identifier
+- `tcs_percentage` (DECIMAL) → TCS tax percentage
+- `cash_discount_percentage` (DECIMAL) → Cash discount percentage
+- `freight` (VARCHAR) → Freight charges
+- `description` (TEXT) → Additional description
+
+**Relationships:**
+- Can be referenced by `sfa_primary_order.dr_id` for order placement
+- Can have assigned sales users from `sfa_user` table
+- Links to warehouses for fulfillment
+
+### Table 5: sfa_primary_order_item
+Order items detail table containing line-item level information for each order.
+
+**Key Columns:**
+- `id` (INT, Primary Key) → Order item ID
+- `order_id` (INT, Foreign Key) → References sfa_primary_order.id
+- `segment_id` (INT) → Product segment ID
+- `segment_name` (VARCHAR) → Segment name (e.g., 'PLY')
+- `product_type` (VARCHAR) → Product type code (e.g., 'SS')
+- `product_id` (INT) → Product identifier
+- `product_code` (VARCHAR) → Product code (e.g., 'GCB1984')
+- `product_name` (VARCHAR) → Full product name (e.g., 'FABRICATE CLUB 19 MM-BWP PLY 8x4')
+- `product_size` (VARCHAR) → Product size specification
+
+**Quantity Fields:**
+- `qty` (INT) → Ordered quantity
+- `sale_qty` (INT) → Sold quantity
+- `sale_dispatch_qty` (INT) → Dispatched quantity
+
+**Pricing Fields:**
+- `net_price` (DECIMAL) → Net price per unit
+- `price` (DECIMAL) → Unit price
+- `total_price` (DECIMAL) → Total price before discounts
+- `amount` (DECIMAL) → Amount
+- `total_amount` (DECIMAL) → Final total amount
+- `product_price` (VARCHAR) → Product price details
+- `total_price_qty` (VARCHAR) → Price-quantity calculation
+
+**Discount & Tax Fields:**
+- `discount_amount` (DECIMAL) → Discount amount
+- `total_item_discount` (DECIMAL) → Total discount for item
+- `discount_percent` (DECIMAL) → Discount percentage
+- `discount_percentages` (VARCHAR) → Multiple discount percentages
+- `gst_amount` (DECIMAL) → GST tax amount
+- `gst_percent` (DECIMAL) → GST percentage
+
+**Product Attributes:**
+- `brand` (VARCHAR) → Brand name (e.g., 'FABRICATE CLUB')
+- `size` (VARCHAR) → Size dimension (e.g., '8x4')
+- `thickness` (VARCHAR) → Product thickness (e.g., '19 MM-BWP')
+- `color` (VARCHAR) → Product color
+
+**Weight & Freight:**
+- `weight` (DECIMAL) → Weight per unit
+- `total_weight` (DECIMAL) → Total weight (weight × qty)
+- `freight_amount` (VARCHAR) → Freight charges
+- `total_price_with_freight` (VARCHAR) → Total including freight
+
+**Status:**
+- `del` (INT) → Soft delete flag (0=active, 1=deleted)
+
+**Relationships:**
+- Links to `sfa_primary_order` via `order_id` column
+- Contains item-level details for each order
+- Multiple items can exist for a single order
+
+## Important Query Guidelines for sfa_dr:
+
+1. **Customer Type Filters:**
+   - Channel Partners: `type = '1'`
+   - Sub-Dealers: `type = '3'`
+   - Primary OEM: `type = '7'`
+   - Ply Expert: `type = '8'`
+   - Ambassador: `type = '13'`
+   - Builder: `type = '14'`
+   - Secondary OEM: `type = '16'`
+
+2. **Status Filters:**
+   - Active customers: `status = '1' AND del = 0`
+   - Inactive customers: `status = '0'`
+   - Exclude deleted: Always include `del = 0`
+
+3. **Common Joins:**
+   - With orders: `sfa_primary_order.dr_id = sfa_dr.id`
+   - With creator: `sfa_dr.created_by = sfa_user.id`
+   - Get customer's orders with user hierarchy
+
+4. **Date Calculations:**
+   - Days since last visit: `DATEDIFF(NOW(), last_checkin)` 
+   - Days since last order: `DATEDIFF(NOW(), last_order)`
+   - Customer aging: Based on `date_created`
+
+5. **Metric Queries:**
+   - Top customers by sales: ORDER BY current_year_sales DESC
+   - Active customers: WHERE last_order >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+   - Customer frequency analysis: GROUP BY order_frequency ranges
+
+6. **Location-based Queries:**
+   - Filter by state/district/city columns
+   - GPS-based distance calculations using lat/lng
+   - Territory analysis using division_name
+
+7. **Financial Queries:**
+   - Outstanding balance: account_balance > 0
+   - Credit limit utilization: (account_balance / credit_limit) * 100
+   - Overdue accounts: Based on credit_period and last_payment
+
+### Column to UI Header Mappings for sfa_user:
+
+**Core User Information:**
+- `id` (INT, Primary Key) → Used for row identification, not displayed
+- `name` (VARCHAR) → Header: 'Name' - Full name of the user (displayed as clickable link)
+- `email` (VARCHAR) → Header: 'Email ID' - Official email address
+- `PersonalEmail` (VARCHAR) → Personal email (not shown in main table)
+- `contact_01` (VARCHAR) → Header: 'Mobile No.' - Primary contact number
+- `offmobileno` (VARCHAR) → Header: 'Official Mobile No.' - Official mobile number
+- `contact_02` (VARCHAR) → Secondary contact (not shown in main table)
+- `employee_id` (VARCHAR) → Header: 'Employee Code' - Employee identification code
+
+**User Type & Designation:**
+- `designation_id` (INT) → Foreign key for designation (not displayed)
+- `designation_name` (VARCHAR) → Header: 'Designation' - User's job title/designation
+- `user_type` (VARCHAR) → Determines table view ('Sales User', 'System User', 'Inactive User')
+- `access_level` (INT) → User permission level (backend use)
+
+**Creation & Update Tracking:**
+- `date_created` (DATETIME) → Header: 'Date Created' - When record was created
+- `created_by` (INT) → Creator's user ID (not displayed)
+- `created_by_name` (VARCHAR) → Header: 'Created By' - Name of record creator
+- `last_updated_by` (INT) → Updater's user ID (not displayed)
+- `last_updated_by_name` (VARCHAR) → Header: 'Updated By' - Name of last updater
+- `last_updated_on` (DATETIME) → Header: 'Updated At' - Last update timestamp
+
+**Location & Working Area (Sales User specific):**
+- `baseStation` (VARCHAR) → Header: 'Base Station' - User's base location
+- `working_state_name` (VARCHAR) → Header: 'Working State' - States where user works
+- `state_name` (VARCHAR) → User's home state (not in main view)
+- `working_division` (VARCHAR) → Working division (backend)
+- `working_district_name` (TEXT) → Working districts list (backend)
+- `district_name` (VARCHAR) → Home district (not in main view)
+- `city` (VARCHAR) → City name (not in main view)
+- `area` (VARCHAR) → Area/locality (not in main view)
+- `address` (TEXT) → Full address (not in main view)
+- `pincode` (VARCHAR) → Postal code (not in main view)
+
+**Schedule & Status:**
+- `weekly_off` (VARCHAR) → Header: 'Weekly off' - Day of week off (Sunday-Saturday)
+- `status` (ENUM: 'active','deactive') → Header: 'Status' - Shown as toggle switch
+- `del` (TINYINT) → Soft delete flag (0=active, 1=deleted) - Filter condition
+
+**Inactive User Information:**
+- `date_inactive` (DATE) → Header: 'In-activation Date' - When user became inactive
+- `reasonOfInactive` (VARCHAR) → Header: 'Reason Of Leave' - Why user left
+- `remarks` (TEXT) → Header: 'Remarks' - Additional notes about inactivation
+
+**Manager & Reporting (Sales User specific):**
+- `assign_user` (VARCHAR) → Header: 'Reporting Manager' - Manager's name
+- `assign_user_code` (VARCHAR) → Header: 'Manager Code' - Manager's employee code
+- `assign_unit` (INT) → Assigned unit ID (backend)
+- `assign_company` (INT) → Assigned company ID (backend)
+
+**Authentication & Device:**
+- `username` (VARCHAR) → Login username (backend)
+- `password` (VARCHAR) → Encrypted password (backend)
+- `user_token` (TEXT) → JWT authentication token (backend)
+- `fcm_token` (TEXT) → Firebase push notification token (backend)
+- `device_unique_id` (VARCHAR) → Unique device identifier (used for 'Reset Device' button)
+- `unique_token` (VARCHAR) → Session token (backend)
+- `device_info` (TEXT) → Device model and OS info (backend)
+- `app_version` (VARCHAR) → Mobile app version (backend)
+
+**Permissions & Features:**
+- `geoFencingFlag` (TINYINT) → Header: 'GeoFencing' - Shown as toggle switch
+- `checkinCameraFlag` (TINYINT) → Header: 'Camera' - Shown as toggle switch
+- `camera_flag` (TINYINT) → General camera permission (backend)
+- `notification_flag` (TINYINT) → Push notification permission (backend)
+- `support_access` (TINYINT) → Support access flag (backend)
+- `purchase_right` (TINYINT) → Purchase rights flag (backend)
+
+**Third Party Integration:**
+- `third_party_disable` (TINYINT) → Header: 'Third Party App' - Shows blocking status
+- `third_party_app` (VARCHAR) → Header: 'Third Party App' - App name if blocked
+
+**Additional Fields:**
+- `branch_code` (VARCHAR) → Branch identifier (backend)
+- `date_of_joining` (DATE) → Employment start date (not in main view)
+- `first_login` (DATETIME) → First system login (backend)
+- `latest_login` (DATETIME) → Most recent login (backend)
+- `image` (VARCHAR) → Profile image path (not in main view)
+- `brand` (TEXT) → Associated brands (backend)
+- `order_type` (VARCHAR) → Order types (e.g., 'Both', 'Direct') (backend)
+- `test_user_flag` (TINYINT) → Test account flag (backend)
+- `company_dispatch_type` (VARCHAR) → Dispatch type (backend)
+- `warehouse_id` (INT) → Warehouse assignment (backend)
+- `expense_type` (VARCHAR) → Expense category (backend)
+- `lat` (DECIMAL) → GPS latitude (backend)
+- `lng` (DECIMAL) → GPS longitude (backend)
+- `gps_address` (TEXT) → GPS resolved address (backend)
+
+## Important Query Guidelines:
+
+1. **User Type Filters:**
+   - Sales Users: `user_type = 'Sales User'`
+   - System Users: `user_type = 'System User'`
+   - Inactive Users: Look for `date_inactive IS NOT NULL` or `status = 'deactive'`
+
+2. **Hierarchy Queries:**
+   - To find juniors under a senior: Join `sfa_asm_assign` on `rsm_id` (senior)
+   - To find a junior's senior/supervisor: Join `sfa_asm_assign` on `asm_id` (junior)
+   - For complete hierarchy: Use multiple joins between `sfa_user` and `sfa_asm_assign`
+   - Remember: asm_id = junior employee, rsm_id = senior employee
+   
+3. **Multi-Level Hierarchy Queries (IMPORTANT):**
+   - When user asks for 'all seniors' or 'complete hierarchy', use recursive CTEs or multiple self-joins
+   - To get senior's senior: Join sfa_asm_assign multiple times
+   - Example pattern for 3 levels of seniors:
+     * First join: Get immediate senior (person as asm_id → their rsm_id)
+     * Second join: Get senior's senior (first senior as asm_id → their rsm_id)
+     * Third join: Get senior's senior's senior (second senior as asm_id → their rsm_id)
+   - Each level requires joining sfa_asm_assign again where previous level's rsm_id becomes the new asm_id
+   - Use LEFT JOINs to include people even if they don't have seniors at all levels
+   - When asked for 'all seniors of [person]', create a query that shows the complete upward chain
+
+4. **Recursive Hierarchy Patterns (CRITICAL FOR MULTI-LEVEL):**
+   - For 'all seniors of a person' or 'all reporting managers':
+     * Use WITH RECURSIVE CTE to traverse up the hierarchy
+     * Base case: Find the person and their immediate senior
+     * Recursive case: For each senior found, find their senior
+     * Continue until no more seniors are found
+   - Example structure for finding all seniors:
+     WITH RECURSIVE hierarchy AS (
+       SELECT person and immediate senior with level 1
+       UNION ALL
+       SELECT senior's senior with incremented level
+     )
+   - For MySQL < 8.0: Use multiple LEFT JOINs (h1, h2, h3, etc.)
+   - ALWAYS include level numbers to show hierarchy depth
+   - Join with sfa_user to get names and details of seniors
+
+5. **Always Include:** `del = 0` to exclude soft-deleted records (for sfa_user table)
+
+6. **Common Filter Patterns:**
+   - Sales executives: `designation_name LIKE '%Sales%' OR user_type LIKE '%Sales%'`
+   - Active users: `status = 'active' AND del = 0`
+   - Users with devices: `device_unique_id IS NOT NULL AND device_unique_id != ''`
+   - Users with reporting managers: Join with `sfa_asm_assign` table or use `assign_user` field
+
+7. **Date Filters:**
+   - Recent joins: `date_of_joining >= '2024-01-01'`
+   - Recently updated: `last_updated_on >= DATE_SUB(NOW(), INTERVAL 30 DAY)`
+
+8. **Permission Filters:**
+   - Geofencing enabled: `geoFencingFlag = 1`
+   - Camera required: `checkinCameraFlag = 1`
+
+9. **Location Filters:**
+   - State-based: Use `working_state_name` for work location, `state_name` for home
+   - Base station: `baseStation = 'station_name'`
+
+10. **Hierarchy Filters:**
+    - Juniors reporting to specific senior: Use `sfa_asm_assign` with rsm_id filter
+    - Find all subordinates: Join with `sfa_asm_assign` on rsm_id
+    - Find unassigned juniors: LEFT JOIN with `sfa_asm_assign` WHERE rsm_id IS NULL
+    - Find complete upward hierarchy: Use recursive CTE or multiple self-joins
+    - Find complete downward hierarchy: Use recursive CTE or multiple self-joins in reverse
+
+11. **Order-Related Queries:**
+    - Orders table: Use `sfa_primary_order` for all order-related queries
+    - Filter active orders: Always include `del = 0`
+    - Order statuses: 'Pending', 'Approved', 'Reject', 'Hold', 'despatched', 'partialDispatched'
+    - Join with sfa_user on created_by to get order creator details
+    - Join with sfa_asm_assign to get order creator's reporting hierarchy
+    - For 'total amount', use order_total column
+    - For 'weight', use weight column (measured in tons)
+    - Warehouse values include 'Savitri Woods'
+    - Order types: 'Fresh Order' or 'Follow Up Order' (freshOrdType column)
+
+12. **Order Item Queries (sfa_primary_order_item):**
+    - Join with sfa_primary_order: `sfa_primary_order_item.order_id = sfa_primary_order.id`
+    - Product segments: Filter by segment_name (e.g., 'PLY')
+    - Product analysis: Use product_code, product_name, brand columns
+    - Quantity analysis: Compare qty (ordered) vs sale_dispatch_qty (dispatched)
+    - Price calculations: Use total_amount for final price including discounts
+    - Weight calculations: total_weight = weight × qty
+    - Discount analysis: Use discount_amount, discount_percent columns
+    - GST/Tax: Use gst_amount and gst_percent columns
+    - Product attributes: Filter by brand, size, thickness, color
+    - Always exclude deleted items: `del = 0`
+
+    13. **Order-Customer Relationship (CRITICAL):**
+    - Orders are linked to customers via: sfa_primary_order.dr_id = sfa_dr.id
+    - To filter orders by company name: JOIN sfa_dr ON sfa_primary_order.dr_id = sfa_dr.id
+    - To get customer details for an order: Always join with sfa_dr table
+
+Return ONLY the SQL query without explanations or markdown formatting.";
+    
+  // Step 2.5: ADD ANALYTICAL PATTERNS HERE
+    $analyticalPatterns = "
+
+## Analytical Query Patterns:
+
+1. **Trend Analysis:**
+   - Monthly/Weekly/Daily aggregations using DATE_FORMAT()
+   - Year-over-year comparisons with YEAR() and conditional aggregation
+   - Growth rate calculations using LAG() window functions or self-joins
+   - Example: DATE_FORMAT(date_created, '%Y-%m') for monthly grouping
+
+2. **Performance Metrics:**
+   - Conversion rates: (successful/total) * 100
+   - Average order values: AVG(order_total)
+   - Employee productivity: COUNT(orders)/COUNT(DISTINCT days)
+   - Efficiency metrics using CASE WHEN statements
+
+3. **Comparative Analysis:**
+   - Regional comparisons using GROUP BY state_name/working_state_name
+   - Period-over-period changes using subqueries or CTEs
+   - Ranking using RANK() or DENSE_RANK() window functions
+   - Percentiles using PERCENT_RANK() or NTILE()
+
+4. **Time-based Aggregations:**
+   - Last N months: WHERE date_created >= DATE_SUB(NOW(), INTERVAL N MONTH)
+   - Year-to-date: WHERE YEAR(date_created) = YEAR(NOW())
+   - Quarter comparisons: QUARTER(date_created)
+   - Week-over-week: WEEK(date_created)
+
+5. **Advanced Analytical Patterns:**
+   - Running totals: SUM() OVER (ORDER BY date)
+   - Moving averages: AVG() OVER (ORDER BY date ROWS BETWEEN N PRECEDING AND CURRENT ROW)
+   - Cohort analysis: GROUP BY date_of_joining cohorts
+   - Retention metrics: Self-join on different time periods
+
+## Customer/Dealer Analytics:
+
+6. **Customer Performance Metrics:**
+   - Customer lifetime value: SUM(order_total) per customer over time
+   - Purchase frequency: COUNT(orders)/DATEDIFF(MAX(date), MIN(date))
+   - Customer retention: Customers with orders in multiple periods
+   - Churn analysis: Customers with no recent orders (last_order date filters)
+   - Customer acquisition cost: Based on date_created and creation costs
+   - Repeat customer rate: Customers with multiple orders vs single orders
+
+7. **Geographic Analysis:**
+   - Sales by state/district: GROUP BY state, district from sfa_dr
+   - Territory performance: JOIN sfa_dr with sfa_user on assigned_sales_user
+   - Customer density: COUNT(customers) by location (state/district/city)
+   - Regional growth: Compare customer counts by location over time periods
+   - Distance-based analysis: Using lat/lng coordinates
+
+8. **Customer Segmentation:**
+   - By type: GROUP BY type (Channel Partner=1, Sub-Dealer=3, OEM=7, etc.)
+   - By sales volume: CASE WHEN current_year_sales ranges (high/medium/low value)
+   - By activity level: Based on last_order, last_checkin dates
+   - By credit utilization: (account_balance/credit_limit)*100 ranges
+   - By order frequency: GROUP BY order_frequency values
+   - By customer age: DATEDIFF(NOW(), date_created) ranges
+
+9. **Financial Analytics:**
+   - Outstanding receivables: SUM(account_balance) WHERE account_balance > 0
+   - Credit limit utilization: AVG((account_balance/credit_limit)*100)
+   - Payment behavior: Analysis based on last_payment vs credit_period
+   - Revenue concentration: Pareto analysis (80/20 rule) of customers
+   - Cash flow analysis: Based on advance_payment and outstanding balances
+
+10. **Customer Engagement Analytics:**
+    - Visit frequency: Based on last_checkin patterns
+    - Order patterns: Fresh vs Follow-up orders analysis
+    - Digital engagement: Based on app usage (latest_login, app_version)
+    - Communication preferences: Based on contact methods used
+    - Loyalty metrics: Based on marketing_points and wallet_point accumulation
+
+Example customer analytical queries:
+- 'Top 10 customers by revenue this year' → ORDER BY current_year_sales DESC LIMIT 10
+- 'Inactive customers in last 90 days' → WHERE last_order < DATE_SUB(NOW(), INTERVAL 90 DAY)
+- 'Customer distribution by state' → GROUP BY state with COUNT(*)
+- 'Average order value by customer type' → GROUP BY type with AVG(order_total) from joined orders
+- 'Customers with overdue payments' → WHERE DATEDIFF(NOW(), last_payment) > credit_period
+- 'Customer churn rate by quarter' → Cohort analysis using date_created and last_order
+- 'Revenue trend by customer segment' → Monthly revenue grouped by customer type
+- 'Credit utilization analysis' → Ranges of (account_balance/credit_limit)*100
+- 'Customer acquisition trends' → Monthly new customer counts using date_created
+- 'Territory-wise customer performance' → JOIN with assigned sales users and group by territory
+
+## Product & Order Item Analytics:
+
+11. **Product Performance Analysis:**
+    - Top selling products: GROUP BY product_name ORDER BY SUM(qty) DESC
+    - Product revenue contribution: SUM(total_amount) by product_id
+    - Product mix analysis: COUNT(DISTINCT product_id) per order
+    - Brand performance: GROUP BY brand with SUM(total_amount)
+    - Segment analysis: GROUP BY segment_name with metrics
+    - Size/thickness preferences: GROUP BY size, thickness
+
+12. **Order Item Metrics:**
+    - Average items per order: AVG(COUNT(*)) grouped by order_id
+    - Dispatch fulfillment rate: SUM(sale_dispatch_qty)/SUM(qty)*100
+    - Pending deliveries: WHERE qty > sale_dispatch_qty
+    - Product discount analysis: AVG(discount_percent) by product
+    - GST collection: SUM(gst_amount) grouped by period
+    - Weight analysis: SUM(total_weight) for logistics planning
+
+13. **Product Trend Analysis:**
+    - Monthly product sales: GROUP BY product_id, DATE_FORMAT(date)
+    - Seasonal product demand: Quarterly analysis of product quantities
+    - Product lifecycle: First order vs last order dates per product
+    - Cross-selling patterns: Products frequently ordered together
+    - Product profitability: (total_amount - discount_amount)/qty
+
+Example product/item queries:
+- 'Best selling PLY products' → WHERE segment_name='PLY' ORDER BY SUM(qty)
+- 'Products with highest discount' → ORDER BY discount_percent DESC
+- 'Pending dispatch items' → WHERE qty > sale_dispatch_qty
+- 'Brand-wise revenue' → GROUP BY brand with SUM(total_amount)
+- 'Product weight distribution' → GROUP BY weight ranges
+- 'Items per order analysis' → COUNT(*) GROUP BY order_id";
+    
+    // Step 3: Create a clear instruction for Gemini with enhanced analytical context
+    $prompt = $schema . "\n\n" . 
+              $analyticalPatterns . "\n\n" .
+              "Convert the following natural language query to MySQL SQL: \"" . $userQuery . "\"" . "\n\n" .
+              "Important instructions:" . "\n" .
+              "1. Return ONLY the SQL query without any explanation or markdown formatting" . "\n" .
+              "2. For 'sales executives', use designation_name LIKE '%Sales%' OR user_type LIKE '%Sales%'" . "\n" .
+              "3. For state filters, use state_name or working_state_name columns" . "\n" .
+              "4. Always filter out deleted records by adding del = 0 condition" . "\n" .
+              "5. Return only SELECT queries" . "\n" .
+              "6. When asked for 'all reporting managers' or 'all seniors', use WITH RECURSIVE CTE to get complete hierarchy" . "\n" .
+              "7. For orders, use sfa_primary_order table and join with sfa_user for creator details" . "\n" .
+              "8. When showing hierarchy, include level numbers (1=immediate senior, 2=senior's senior, etc.)" . "\n" .
+              "9. For multi-level hierarchy: Each person can be both asm_id (junior) and rsm_id (senior) in different records" . "\n" .
+              "10. If query mentions 'levels', always include a level column showing hierarchy depth" . "\n" .
+              "11. For trend analysis, use appropriate date functions and GROUP BY" . "\n" .
+              "12. For rankings, use ORDER BY with LIMIT or window functions" . "\n" .
+              "13. For comparisons, use conditional aggregation or CASE statements" . "\n" .
+              "14. Include calculated metrics when asked for rates, averages, or percentages" . "\n" .
+              "15. For customer/dealer queries, use sfa_dr table with appropriate joins to sfa_primary_order and sfa_user" . "\n" .
+              "16. Customer types: 1=Channel Partner, 3=Sub-Dealer, 7=Primary OEM, 8=Ply Expert, 13=Ambassador, 14=Builder, 16=Secondary OEM" . "\n" .
+              "17. For customer analytics, consider current_year_sales, last_order, last_checkin, account_balance, and credit_limit columns" . "\n" .
+              "18. Always include active customer filter: status='1' AND del=0 for sfa_dr table" . "\n" .
+             "19. For order item details with customer info, use THREE table join:
+     - sfa_primary_order_item (for items)
+     - sfa_primary_order (for order details) 
+     - sfa_dr (for customer/company details)
+     Join pattern: sfa_primary_order_item.order_id = sfa_primary_order.id AND sfa_primary_order.dr_id = sfa_dr.id" . "\n" .
+              "20. For product-level analysis, use sfa_primary_order_item table for details like product_name, brand, qty, total_amount";
+    
+    // Step 4: Prepare payload for Gemini
+    $payload = [
+        "contents" => [
+            [
+                "parts" => [
+                    [
+                        "text" => $prompt
+                    ]
+                ]
+            ]
+        ]
+    ];
+    
+    // Step 5: Call Gemini API
+    $apiKey = "AIzaSyDA8Cdz75BfZqsgLiWUSblqg7exAjSgrZQ"; 
+    // $apiKey = "AIzaSyDQPMtv9-ERW3F2z0cBL3f-Ow5tCiKYf_k"; // Consider moving this to config
+    $model = "gemini-1.5-flash"; // or "gemini-1.5-pro" for more complex queries
+    
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}";
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+    
+    // Check for curl errors
+    if ($curlError) {
+        echo json_encode(["error" => "CURL Error: " . $curlError]);
+        return;
+    }
+    
+    // Check HTTP response code
+    if ($httpCode !== 200) {
+        echo json_encode(["error" => "API Error", "http_code" => $httpCode, "response" => $response]);
+        return;
+    }
+    
+    // Step 6: Parse the response
+    $result = json_decode($response, true);
+    
+    // Extract the generated SQL from Gemini's response
+    $generatedSQL = null;
+    if (isset($result['candidates'][0]['content']['parts'][0]['text'])) {
+        $generatedSQL = trim($result['candidates'][0]['content']['parts'][0]['text']);
+        
+        // Clean up the SQL (remove any markdown code blocks if present)
+        $generatedSQL = preg_replace('/```sql\s*/i', '', $generatedSQL);
+        $generatedSQL = preg_replace('/```\s*$/i', '', $generatedSQL);
+        $generatedSQL = preg_replace('/^```\s*/i', '', $generatedSQL);
+        $generatedSQL = trim($generatedSQL);
+    }
+    
+    // Step 6.5: Check MySQL version for CTE support (optional)
+    $cteSupported = true; // Default to true
+    try {
+        $versionQuery = $this->db->query("SELECT VERSION() as version");
+        if ($versionQuery) {
+            $versionResult = $versionQuery->row_array();
+            $mysqlVersion = $versionResult['version'];
+            
+            preg_match('/^(\d+)\.(\d+)/', $mysqlVersion, $matches);
+            $majorVersion = isset($matches[1]) ? intval($matches[1]) : 0;
+            $minorVersion = isset($matches[2]) ? intval($matches[2]) : 0;
+            $cteSupported = ($majorVersion > 8) || ($majorVersion == 8 && $minorVersion >= 0);
+        }
+    } catch (Exception $e) {
+        // Assume CTE is supported if we can't check version
+        $cteSupported = true;
+    }
+    
+    // Step 7: Validate and execute the SQL
+    if ($generatedSQL) {
+        $sqlLower = strtolower(trim($generatedSQL));
+        $dangerousKeywords = ['drop', 'delete', 'truncate', 'update', 'insert', 'alter', 'create', 'grant', 'revoke'];
+        $isDangerous = false;
+        
+        foreach ($dangerousKeywords as $keyword) {
+            if (preg_match('/\b' . $keyword . '\b/i', $generatedSQL)) {
+                $isDangerous = true;
+                break;
+            }
+        }
+        
+        // Check if it's a SELECT query or a CTE (WITH clause that ends with SELECT)
+        $isSelectQuery = false;
+        if (strpos($sqlLower, 'select') === 0) {
+            $isSelectQuery = true;
+        } elseif (strpos($sqlLower, 'with') === 0) {
+            // Check if it's a CTE (Common Table Expression) with SELECT
+            if (preg_match('/\bselect\b/i', $generatedSQL)) {
+                $isSelectQuery = true;
+            }
+        }
+        
+        // Check if query uses CTE but MySQL doesn't support it
+        if (!$cteSupported && (strpos($sqlLower, 'with recursive') !== false || strpos($sqlLower, 'with ') === 0)) {
+            // Re-prompt for non-CTE version
+            $userQuery .= " (Note: MySQL version is below 8.0, use multiple LEFT JOINs instead of WITH RECURSIVE, up to 5 levels)";
+            
+            // Recreate prompt with MySQL version note
+            $prompt = $schema . "\n\n" . 
+                      $analyticalPatterns . "\n\n" .
+                      "Convert the following natural language query to MySQL SQL: \"" . $userQuery . "\"" . "\n\n" .
+                      "Important: MySQL version is below 8.0, DO NOT use WITH RECURSIVE. Use multiple LEFT JOINs instead.";
+            
+            // Re-call Gemini API with updated prompt
+            $payload['contents'][0]['parts'][0]['text'] = $prompt;
+            
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            
+            $response = curl_exec($ch);
+            curl_close($ch);
+            
+            $result = json_decode($response, true);
+            if (isset($result['candidates'][0]['content']['parts'][0]['text'])) {
+                $generatedSQL = trim($result['candidates'][0]['content']['parts'][0]['text']);
+                $generatedSQL = preg_replace('/```sql\s*/i', '', $generatedSQL);
+                $generatedSQL = preg_replace('/```\s*$/i', '', $generatedSQL);
+                $generatedSQL = preg_replace('/^```\s*/i', '', $generatedSQL);
+                $generatedSQL = trim($generatedSQL);
+                $sqlLower = strtolower(trim($generatedSQL));
+            }
+        }
+        
+        if ($isSelectQuery && !$isDangerous) {
+            try {
+                $query = $this->db->query($generatedSQL);
+                if ($query) {
+                    $data = $query->result_array();
+                    echo json_encode([
+                        "success" => true,
+                        "sql" => $generatedSQL,
+                        "count" => count($data),
+                        "data" => $data,
+                        "mysql_version" => isset($mysqlVersion) ? $mysqlVersion : 'unknown'
+                    ]);
+                } else {
+                    echo json_encode([
+                        "success" => false,
+                        "error" => "Database query failed",
+                        "sql" => $generatedSQL,
+                        "db_error" => $this->db->error()
+                    ]);
+                }
+            } catch (Exception $e) {
+                echo json_encode([
+                    "success" => false,
+                    "error" => "Query execution error",
+                    "message" => $e->getMessage(),
+                    "sql" => $generatedSQL
+                ]);
+            }
+        } else {
+            echo json_encode([
+                "success" => false,
+                "error" => "Invalid or unsafe SQL generated",
+                "sql" => $generatedSQL,
+                "reason" => $isDangerous ? "Contains dangerous keywords" : "Not a SELECT query"
+            ]);
+        }
+    } else {
+        echo json_encode([
+            "success" => false,
+            "error" => "No SQL generated from API",
+            "api_response" => $result
+        ]);
+    }
+}
